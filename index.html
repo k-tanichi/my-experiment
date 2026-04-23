@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>心理学実験室</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #f3f4f6; /* 薄いグレー */
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        .alert-box {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.3);
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 class="text-4xl md:text-6xl font-bold text-gray-800 mb-8">
+            心理学実験室へようこそ
+        </h1>
+        
+        <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full shadow-lg transition duration-300 transform hover:scale-105 text-xl">
+            実験を開始する
+        </button>
+    </div>
+
+    <!-- カスタムメッセージボックス (alert()の代わり) -->
+    <div id="overlay" class="overlay"></div>
+    <div id="alertBox" class="alert-box">
+        <p class="text-2xl font-semibold mb-4 text-gray-700">Hello World!</p>
+        <button id="closeBtn" class="bg-gray-200 hover:bg-gray-300 py-2 px-4 rounded">閉じる</button>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const alertBox = document.getElementById('alertBox');
+        const overlay = document.getElementById('overlay');
+        const closeBtn = document.getElementById('closeBtn');
+
+        // ボタンが押された時の処理
+        startBtn.addEventListener('click', () => {
+            // ブラウザ標準の alert() は UI をブロックするため、カスタム要素で表示します
+            alertBox.style.display = 'block';
+            overlay.style.display = 'block';
+        });
+
+        // 閉じるボタンの処理
+        closeBtn.addEventListener('click', () => {
+            alertBox.style.display = 'none';
+            overlay.style.display = 'none';
+        });
+
+        // オーバーレイクリックでも閉じる
+        overlay.addEventListener('click', () => {
+            alertBox.style.display = 'none';
+            overlay.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
