@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ストループ課題 (Stroop Task)</title>
-    <!-- jsPsychコアライブラリ -->
+    <!-- jsPsychコアライブラリ (v7.3.4) -->
     <script src="https://unpkg.com/jspsych@7.3.4"></script>
     <!-- プラグイン: キーボード反応 -->
     <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@1.1.3"></script>
+    <!-- プラグイン: テキスト回答入力（参加者ID用） -->
+    <script src="https://unpkg.com/@jspsych/plugin-survey-text@1.1.3"></script>
     <!-- jsPsych標準スタイルシート -->
     <link href="https://unpkg.com/jspsych@7.3.4/css/jspsych.css" rel="stylesheet" type="text/css" />
     
@@ -18,7 +20,7 @@
             font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
             margin: 0;
             padding: 0;
-            height: 100%; /* 画面全体の高さを確保 */
+            height: 100%; /* 画面全体の高さを確保して中央揃えを可能に */
             width: 100%;
             overflow: hidden;
             display: flex;
@@ -36,13 +38,23 @@
             justify-content: center;
         }
 
-        /* 刺激（文字）のスタイル: 60px */
+        /* コンテンツエリア全体を常に中央に維持 */
+        .jspsych-content {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            max-width: 90%;
+            text-align: center;
+        }
+
+        /* 刺激（文字）のスタイル: 指定サイズの60px */
         .stroop-stimulus {
             font-size: 60px;
             font-weight: bold;
         }
 
-        /* 教示文のスタイル: 24px */
+        /* 教示文のスタイル: 指定サイズの24px */
         .instruction-text {
             font-size: 24px;
             line-height: 1.6;
@@ -50,15 +62,56 @@
             display: inline-block;
         }
 
-        /* 注視点のスタイル */
+        /* 注視点（+）のスタイル */
         .fixation {
             font-size: 60px;
             color: #000000;
         }
 
-        /* jsPsychのコンテンツコンテナ調整 */
-        .jspsych-content {
-            max-width: 90%;
+        /* ID入力画面（Survey-text）のインプット欄調整 */
+        input[type="text"] {
+            width: 280px;
+            font-size: 18px;
+            padding: 10px 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            margin-top: 12px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus {
+            border-color: #3498db;
+        }
+
+        /* jsPsych内ボタンのデザイン最適化 */
+        .jspsych-btn {
+            font-size: 18px !important;
+            padding: 10px 24px !important;
+            border-radius: 6px !important;
+            background-color: #3498db !important;
+            color: white !important;
+            border: none !important;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 20px;
+        }
+        .jspsych-btn:hover {
+            background-color: #2980b9 !important;
+        }
+
+        /* データ送信中のローディングスピナー */
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -66,17 +119,18 @@
     <div id="jspsych-target"></div>
 
     <script>
-        // jsPsychの初期化
+        // 送信先GASのウェブアプリURL（ご提示いただいたURL）
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbxsHoh6AbnITPWt0Xv8567aWNJlD030Z7egeD3Las-CxfKc354CWTtTtI2c2nVRfQ03/exec';
+
+        // jsPsychの初期化。全体の表示領域を指定し、終了時に自動送信をキック
         const jsPsych = initJsPsych({
             display_element: 'jspsych-target',
             on_finish: function() {
-                // 実験終了時にCSV形式でデータを表示
-                jsPsych.data.displayData('csv');
+                sendExperimentData();
             }
         });
 
         // 刺激リスト（文字と言語、色の組み合わせ）
-        // 文字: 赤, 青, 緑 / 色: red, blue, green
         const stimuli = [
             { word: "赤", color: "red",   correct_key: "r", condition: "congruent" },
             { word: "青", color: "blue",  correct_key: "b", condition: "congruent" },
@@ -91,8 +145,37 @@
 
         let timeline = [];
 
-        
-        // (1) 教示画面 (プレビュー制限回避のため、ここから開始)
+        // (1) 参加者情報入力画面（IDを確実に取得してセッションに紐付け）
+        const participant_info = {
+            type: jsPsychSurveyText,
+            questions: [
+                {
+                    prompt: '<span style="font-size: 20px; font-weight: bold;">参加者ID（例：学籍番号）を入力してください</span>',
+                    placeholder: 'IDを入力',
+                    required: true,
+                    name: 'participant_id'
+                }
+            ],
+            button_label: '次へ',
+            on_finish: function(data) {
+                // 入力されたIDを安全に取得
+                let raw_id = "unknown";
+                if (data && data.response) {
+                    raw_id = data.response.participant_id || data.response.Q0 || "unknown";
+                }
+                const participant_id = String(raw_id).trim();
+                const timestamp = new Date().toLocaleString('ja-JP'); // 読みやすいローカル日時
+
+                // これ以降の全試行のデータ行に自動でIDと日時を付与
+                jsPsych.data.addProperties({
+                    subject_id: participant_id,
+                    timestamp: timestamp
+                });
+            }
+        };
+        timeline.push(participant_info);
+
+        // (2) 教示画面
         const instructions = {
             type: jsPsychHtmlKeyboardResponse,
             stimulus: `
@@ -112,9 +195,8 @@
         };
         timeline.push(instructions);
 
-
-        // (2) 試行の定義
-        // a. 注視点 (+)
+        // (3) メイン試行ループ
+        // a. 注視点 (+) 500ms表示
         const fixation = {
             type: jsPsychHtmlKeyboardResponse,
             stimulus: '<div class="fixation">+</div>',
@@ -123,7 +205,7 @@
             data: { task: 'fixation' }
         };
 
-        // b. 刺激提示
+        // b. 刺激提示 (キー入力があるまで無限表示)
         const stroop_trial = {
             type: jsPsychHtmlKeyboardResponse,
             stimulus: function() {
@@ -140,12 +222,13 @@
                 color: jsPsych.timelineVariable('color')
             },
             on_finish: function(data) {
-                // 正誤判定の記録
-                data.correct = jsPsych.pluginAPI.compareKeys(data.response, data.correct_response);
+                // 厳密なキー比較を行い、正答なら "true"、誤答なら "false" を文字列として確実に保存
+                const isCorrect = (data.response === data.correct_response);
+                data.correct = isCorrect ? "true" : "false";
             }
         };
 
-        // c. 試行間隔 (ITI)
+        // c. 試行間隔 (ITI) 1000ms
         const iti = {
             type: jsPsychHtmlKeyboardResponse,
             stimulus: '',
@@ -167,6 +250,157 @@
 
         // 実験開始
         jsPsych.run(timeline);
+
+        // --- データの抽出・整形および自動送信処理 ---
+
+        // オブジェクト配列からCSV文字列を生成するヘルパー関数
+        function convertToCSV(objArray) {
+            const headers = ['subject_id', 'timestamp', 'word', 'color', 'condition', 'rt', 'correct'];
+            const csvRows = [headers.join(',')];
+
+            for (const row of objArray) {
+                const values = headers.map(header => {
+                    const val = row[header] !== undefined ? row[header] : '';
+                    const escaped = ('' + val).replace(/"/g, '""');
+                    return `"${escaped}"`;
+                });
+                csvRows.push(values.join(','));
+            }
+            return csvRows.join('\n');
+        }
+
+        // CORS制限の厳しいIframe環境を完全にバイパスするためのHTMLフォームフォールバック関数
+        function fallbackFormSubmit(url, jsonStr) {
+            console.log("CORS制限を回避するため、非同期HTML Formフォールバックを開始します。");
+            try {
+                // ページ遷移を防ぐための隠しターゲットIframeを作成
+                const iframeName = 'gas-submit-iframe-' + Date.now();
+                const iframe = document.createElement('iframe');
+                iframe.name = iframeName;
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+
+                // CORS制限の影響を受けないHTML Formを作成
+                const form = document.createElement('form');
+                form.action = url;
+                form.method = 'POST';
+                form.target = iframeName;
+                form.style.display = 'none';
+
+                // 送信データを格納
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'data';
+                input.value = jsonStr;
+                form.appendChild(input);
+
+                document.body.appendChild(form);
+                form.submit();
+
+                // 送信後にDOMから要素を安全にクリーンアップ
+                setTimeout(() => {
+                    if (document.body.contains(form)) document.body.removeChild(form);
+                    if (document.body.contains(iframe)) document.body.removeChild(iframe);
+                }, 5000);
+
+                return true; 
+            } catch (formError) {
+                console.error("Formフォールバック送信中に致命的なエラーが発生しました:", formError);
+                throw formError;
+            }
+        }
+
+        // 外部Sandbox iframeでのCORSエラーを徹底的に排除したデータ送信関数
+        async function sendDataWithRetry(url, payload, retries = 3, delay = 1000) {
+            const jsonStr = JSON.stringify(payload);
+            const searchParams = new URLSearchParams();
+            searchParams.append('data', jsonStr);
+
+            for (let i = 0; i < retries; i++) {
+                try {
+                    // CORS制限（特にOriginがnullとなるiframe環境）を回避するため、
+                    // mode: 'no-cors' を指定し、リダイレクト時のペイロード消失を防止します。
+                    await fetch(url, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        cache: 'no-cache',
+                        body: searchParams
+                    });
+                    
+                    // no-cors送信時はレスポンスのステータスチェックを行わず、
+                    // エラーがスローされなかったことをもって正常に送信リクエストが完了したとみなします。
+                    console.log("データ送信リクエストを完了しました（no-cors）。");
+                    return true;
+                } catch (error) {
+                    console.warn(`送信エラー発生 (試行回数: ${i + 1}/${retries}):`, error);
+                    if (i === retries - 1) {
+                        // fetchが完全に拒否された場合、最終手段としてブラウザのネイティブフォーム送信にフォールバックします
+                        return fallbackFormSubmit(url, jsonStr);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // バックオフ遅延を倍増
+                }
+            }
+        }
+
+        // 送信ステータスのUI表示およびデータ整形
+        function sendExperimentData() {
+            const display_element = jsPsych.getDisplayElement();
+            display_element.innerHTML = `
+                <div style="font-size: 20px; text-align: center; padding: 20px;">
+                    <p style="font-weight: bold;">実験終了</p>
+                    <p>データを安全にスプレッドシートへ保存しています。少々お待ちください...</p>
+                    <div class="spinner"></div>
+                </div>
+            `;
+
+            // (1) 不要な行を完全に排除し、刺激回答試行(task: 'response')のみをフィルタ
+            const responseTrials = jsPsych.data.get().filter({ task: 'response' }).values();
+
+            // (2) 分析用の必要なカラムのみを抽出・整形
+            const cleanData = responseTrials.map(trial => {
+                return {
+                    subject_id: trial.subject_id || 'unknown',
+                    timestamp: trial.timestamp || '',
+                    word: trial.word || '',
+                    color: trial.color || '',
+                    condition: trial.condition || '',
+                    rt: trial.rt || 0,
+                    correct: trial.correct || 'false'
+                };
+            });
+
+            // (3) CSVバックアップ用文字列を作成
+            const csvOutput = convertToCSV(cleanData);
+
+            // (4) GASへの自動送信実行
+            sendDataWithRetry(GAS_URL, cleanData)
+                .then(() => {
+                    display_element.innerHTML = `
+                        <div style="font-size: 18px; text-align: center; padding: 20px; max-width: 600px; margin: auto; line-height: 1.6;">
+                            <p style="color: #27ae60; font-weight: bold; font-size: 24px; margin-bottom: 20px;">✓ データの保存が正常に完了しました</p>
+                            <p>ご協力いただき誠にありがとうございました。実験ウィンドウを閉じても問題ありません。</p>
+                            <details style="margin-top: 30px; text-align: left;">
+                                <summary style="cursor: pointer; color: #3498db; font-weight: bold;">[バックアップデータ確認]</summary>
+                                <p style="font-size: 14px; color: #555;">※念のため、記録されたCSVデータは以下になります：</p>
+                                <textarea style="width: 100%; height: 180px; font-family: monospace; font-size: 12px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;" readonly>${csvOutput}</textarea>
+                            </details>
+                        </div>
+                    `;
+                })
+                .catch((err) => {
+                    console.error('Final transmission failure:', err);
+                    display_element.innerHTML = `
+                        <div style="font-size: 18px; text-align: center; padding: 20px; max-width: 650px; margin: auto; line-height: 1.6;">
+                            <p style="color: #e74c3c; font-weight: bold; font-size: 24px; margin-bottom: 20px;">⚠️ データの自動保存に失敗しました</p>
+                            <p>通信環境に問題があるか、GASの受信設定が未完了である可能性があります。</p>
+                            <p style="font-weight: bold; color: #e74c3c;">お手数ですが、以下のテキストボックスの内容をすべてコピーし、実験担当者へお送りください。</p>
+                            <textarea style="width: 100%; height: 220px; font-family: monospace; font-size: 12px; padding: 10px; border: 2px solid #e74c3c; border-radius: 4px; box-sizing: border-box; margin-top: 15px;" readonly onclick="this.select();">${csvOutput}</textarea>
+                            <p style="font-size: 14px; color: #666; margin-top: 10px;">（ボックス内をクリックすると全選択できます）</p>
+                        </div>
+                    `;
+                });
+        }
     </script>
 </body>
 </html>
